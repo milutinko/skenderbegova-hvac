@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Meter Log</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Meter Log">
+<meta name="theme-color" content="#f3f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#11161c" media="(prefers-color-scheme: dark)">
+<style>
+/* Layout idea: one column, summary tiles first, then the entry form, the step chart, the log table, settings last. */
+:root{
+  --bg:#f3f5f7; --panel:#ffffff; --ink:#18212b; --muted:#5f6c7a; --line:#d8dee5;
+  --accent:#c77700; --accent-ink:#ffffff; --nt:#2f5f8a; --bad:#b3261e; --good:#1c7a4a;
+  --display:ui-monospace,"SF Mono",Menlo,Consolas,"Roboto Mono",monospace;
+  --body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#11161c; --panel:#1a212a; --ink:#e7ecf1; --muted:#97a3b0; --line:#2c3642;
+    --accent:#f0a030; --accent-ink:#1a1206; --nt:#6ea8d8; --bad:#ff8a80; --good:#6fd39b;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45;-webkit-text-size-adjust:100%}
+main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:16px;
+  padding:calc(20px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left))}
+header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px}
+h1{font-family:var(--display);font-size:20px;font-weight:600;margin:0}
+h2,summary{font-size:13px;font-weight:600;margin:0 0 12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+summary{cursor:pointer;margin:0}
+details[open] summary{margin-bottom:14px}
+h3{font-size:14px;margin:0 0 6px}
+.status{font-size:13px;color:var(--muted)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.tile.main{border-top:3px solid var(--accent)}
+.tile .label{font-size:12px;color:var(--muted)}
+.tile .value{font-family:var(--display);font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.tile .unit{font-size:13px;font-weight:400;color:var(--muted)}
+.tile .sub{font-size:12px;color:var(--muted)}
+.up{color:var(--bad)} .down{color:var(--good)}
+form.grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:12px}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field.wide{grid-column:1/-1}
+label{font-size:12px;color:var(--muted)}
+input{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:9px 10px;width:100%;min-width:0}
+input.num{font-family:var(--display);font-variant-numeric:tabular-nums}
+input:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:8px}
+.actions{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+button,.filebtn{font:inherit;font-weight:500;border-radius:6px;padding:9px 14px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.small{padding:4px 8px;font-size:12px}
+button.danger{border-color:var(--bad);color:var(--bad)}
+button:disabled{opacity:.5;cursor:default}
+.filebtn input{display:none}
+.msg{font-size:13px;color:var(--bad);min-height:1em}
+.msg.ok{color:var(--good)}
+.hint{font-size:13px;color:var(--muted);margin:0 0 10px;max-width:65ch}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-bottom:8px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+#chart svg{display:block}
+#chart text{font-family:var(--display);font-size:11px;fill:var(--muted)}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+th{font-size:12px;font-weight:500;color:var(--muted)}
+td{font-family:var(--display);font-size:13px}
+th:first-child,td:first-child{text-align:left}
+td.note{font-family:var(--body);text-align:left;white-space:normal;min-width:120px;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+.empty{color:var(--muted);font-size:14px;margin:0}
+.headrow{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+.headrow h2{margin:0}
+.settings{display:flex;flex-direction:column;gap:20px}
+.settings .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+@media (max-width:640px){
+  .tiles{grid-template-columns:repeat(2,1fr)}
+  form.grid{grid-template-columns:1fr 1fr}
+  .field.when{grid-column:1/-1}
+  .settings .grid2{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Meter Log</h1>
+    <span class="status" id="status">On this device only</span>
+  </header>
+
+  <section class="tiles" id="tiles" aria-label="Summary"></section>
+
+  <section class="panel">
+    <h2>New reading</h2>
+    <form id="form" class="grid" novalidate>
+      <div class="field when">
+        <label for="when">Date and time</label>
+        <div class="row">
+          <input type="datetime-local" id="when" required>
+          <button type="button" id="nowBtn">Now</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="vt">VT, higher tariff (kWh)</label>
+        <input class="num" type="text" inputmode="decimal" id="vt" autocomplete="off" placeholder="e.g. 48215.4">
+      </div>
+      <div class="field">
+        <label for="nt">NT, lower tariff (kWh)</label>
+        <input class="num" type="text" inputmode="decimal" id="nt" autocomplete="off" placeholder="optional">
+      </div>
+      <div class="field wide">
+        <label for="note">Note</label>
+        <input type="text" id="note" maxlength="140" autocomplete="off" placeholder="optional, e.g. DHW raised to 50 °C at night">
+      </div>
+      <div class="actions">
+        <button class="primary" type="submit" id="saveBtn">Save reading</button>
+        <span class="msg" id="msg" role="status"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>Consumption between readings (kWh per day)</h2>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--accent)"></span>VT</span>
+      <span><span class="sw" style="background:var(--nt)"></span>NT</span>
+    </div>
+    <div id="chart"></div>
+  </section>
+
+  <section class="panel">
+    <div class="headrow">
+      <h2>Readings</h2>
+      <button type="button" class="small" id="csvBtn">Download CSV</button>
+    </div>
+    <div class="tablewrap" id="tablewrap"></div>
+  </section>
+
+  <details class="panel" id="settings">
+    <summary>Sync and backup</summary>
+    <div class="settings">
+      <div>
+        <h3>Sync between devices</h3>
+        <p class="hint">Paste your Supabase project URL and publishable (or anon) key on each device. Without them, readings stay on this device only.</p>
+        <div class="grid2">
+          <div class="field">
+            <label for="sbUrl">Project URL</label>
+            <input type="url" id="sbUrl" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://xxxx.supabase.co">
+          </div>
+          <div class="field">
+            <label for="sbKey">Publishable key</label>
+            <input type="text" id="sbKey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sb_publishable_…">
+          </div>
+        </div>
+        <div class="actions">
+          <button type="button" class="primary" id="syncSave">Save and sync</button>
+          <button type="button" id="syncNow">Sync now</button>
+          <button type="button" id="syncOff">Turn off sync</button>
+          <span class="msg" id="syncMsg" role="status"></span>
+        </div>
+      </div>
+      <div>
+        <h3>Backup</h3>
+        <p class="hint">Download all readings as one file, or restore from a file. Restoring adds readings; it never deletes any.</p>
+        <div class="actions">
+          <button type="button" id="backupBtn">Download backup</button>
+          <label class="filebtn">Restore from backup<input type="file" id="restoreFile" accept="application/json,.json"></label>
+          <span class="msg" id="backupMsg" role="status"></span>
+        </div>
+      </div>
+    </div>
+  </details>
+</main>
+
+<script>
+(function(){
+"use strict";
+var DAY = 864e5, LS_ROWS = "meterlog.rows", LS_DEL = "meterlog.deleted", LS_CFG = "meterlog.cfg";
+var rows = [], deleted = [], cfg = null, syncing = false, syncAgain = false;
+var $ = function(id){ return document.getElementById(id); };
+
+/* ---------- pure calculations ---------- */
+function compute(list){
+  var s = list.slice().sort(function(a,b){ return a.t - b.t; });
+  var iv = [];
+  for (var i = 1; i < s.length; i++){
+    var a = s[i-1], b = s[i], days = (b.t - a.t) / DAY;
+    var dvt = b.vt - a.vt;
+    var dnt = (a.nt != null && b.nt != null) ? b.nt - a.nt : 0;
+    var kwh = dvt + dnt;
+    iv.push({ from:a.t, to:b.t, days:days, dvt:dvt, dnt:dnt, kwh:kwh,
+              perDay: days > 0 ? kwh/days : 0, kw: days > 0 ? kwh/(days*24) : 0 });
+  }
+  var tot = null;
+  if (iv.length){
+    var sum = 0, nt = 0, d = 0;
+    iv.forEach(function(x){ sum += x.kwh; nt += x.dnt; d += x.days; });
+    tot = { kwh:sum, days:d, perDay: d>0 ? sum/d : 0, kw: d>0 ? sum/(d*24) : 0,
+            ntShare: sum>0 ? nt/sum : 0 };
+  }
+  return { sorted:s, intervals:iv, total:tot };
+}
+function parseNum(str){
+  var v = String(str).trim().replace(/\s/g,"").replace(",",".");
+  if (v === "") return null;
+  var n = Number(v);
+  return isFinite(n) && n >= 0 ? n : NaN;
+}
+
+/* ---------- formatting ---------- */
+function pad(n){ return n < 10 ? "0"+n : ""+n; }
+function fmtDate(t, short){
+  var d = new Date(t);
+  var s = pad(d.getDate())+"."+pad(d.getMonth()+1)+".";
+  return short ? s : s + d.getFullYear() + " " + pad(d.getHours())+":"+pad(d.getMinutes());
+}
+function fmt(n, dec){ return n.toFixed(dec == null ? 1 : dec); }
+function fmtSpan(days){
+  if (days < 1) return fmt(days*24,1)+" h";
+  return fmt(days, days < 10 ? 1 : 0)+" d";
+}
+function nowLocal(){
+  var d = new Date(); d.setSeconds(0,0);
+  return new Date(d.getTime() - d.getTimezoneOffset()*6e4).toISOString().slice(0,16);
+}
+function el(tag, cls, text){
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+function uuid(){
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c){
+    var r = Math.random()*16|0; return (c === "x" ? r : (r&3|8)).toString(16);
+  });
+}
+
+/* ---------- rendering ---------- */
+function tile(label, value, unit, sub, main, subCls){
+  var t = el("div", "tile" + (main ? " main" : ""));
+  t.appendChild(el("div","label",label));
+  var v = el("div","value",value);
+  if (unit){ v.appendChild(document.createTextNode(" ")); v.appendChild(el("span","unit",unit)); }
+  t.appendChild(v);
+  t.appendChild(el("div","sub" + (subCls ? " "+subCls : ""), sub || " "));
+  return t;
+}
+function renderTiles(c){
+  var box = $("tiles"); box.textContent = "";
+  var T = c.total, last = c.intervals[c.intervals.length-1];
+  if (!T){
+    box.appendChild(tile("Average per day","–","kWh","needs two readings",true));
+    box.appendChild(tile("Since last reading","–","kWh/day",""));
+    box.appendChild(tile("Average power","–","kW",""));
+    box.appendChild(tile("Per 30 days","–","kWh",""));
+    return;
+  }
+  box.appendChild(tile("Average per day", fmt(T.perDay), "kWh",
+    fmt(T.kwh,0)+" kWh over "+fmtSpan(T.days), true));
+  var diff = T.perDay > 0 ? (last.perDay/T.perDay - 1)*100 : 0;
+  var many = c.intervals.length > 1;
+  box.appendChild(tile("Since last reading", fmt(last.perDay), "kWh/day",
+    many ? (diff >= 0 ? "+" : "") + fmt(diff,0) + " % vs overall average" : "over " + fmtSpan(last.days),
+    false, many ? (diff > 2 ? "up" : diff < -2 ? "down" : "") : ""));
+  box.appendChild(tile("Average power", fmt(T.kw,2), "kW", "latest interval "+fmt(last.kw,2)+" kW"));
+  box.appendChild(tile("Per 30 days", fmt(T.perDay*30,0), "kWh", "NT share "+fmt(T.ntShare*100,0)+" %"));
+}
+function niceMax(v){
+  if (v <= 0) return 1;
+  var p = Math.pow(10, Math.floor(Math.log10(v))), m = v/p;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
+}
+function renderChart(c){
+  var box = $("chart"); box.textContent = "";
+  var iv = c.intervals.filter(function(x){ return x.days > 0 && x.kwh >= 0; });
+  if (!iv.length){
+    box.appendChild(el("p","empty", c.sorted.length
+      ? "Add a second reading and the first interval appears here."
+      : "Each pair of readings becomes one bar. Its width is the time between them, its height the average daily use."));
+    return;
+  }
+  var W = Math.max(280, box.clientWidth), H = 210, L = 44, R = 8, Tp = 10, B = 24;
+  var t0 = iv[0].from, t1 = iv[iv.length-1].to, span = t1 - t0;
+  var max = niceMax(Math.max.apply(null, iv.map(function(x){ return x.perDay; })));
+  var X = function(t){ return L + (t - t0)/span*(W-L-R); };
+  var Y = function(v){ return Tp + (1 - v/max)*(H-Tp-B); };
+  var ns = "http://www.w3.org/2000/svg";
+  var svg = document.createElementNS(ns,"svg");
+  svg.setAttribute("width",W); svg.setAttribute("height",H); svg.setAttribute("role","img");
+  svg.setAttribute("aria-label","Average kWh per day for each interval between readings");
+  function add(tag, attrs, text){
+    var e = document.createElementNS(ns, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    svg.appendChild(e); return e;
+  }
+  function titleEl(t){ var e = document.createElementNS(ns,"title"); e.textContent = t; return e; }
+  [0, max/2, max].forEach(function(v){
+    add("line",{x1:L,x2:W-R,y1:Y(v),y2:Y(v),stroke:"var(--line)","stroke-width":1});
+    add("text",{x:L-6,y:Y(v)+4,"text-anchor":"end"}, v >= 10 ? fmt(v,0) : fmt(v,1));
+  });
+  iv.forEach(function(x){
+    var x0 = X(x.from), w = Math.max(1, X(x.to) - x0 - 1);
+    var ntPer = Math.max(0, x.dnt)/x.days, vtPer = Math.max(0, x.dvt)/x.days;
+    var tip = fmtDate(x.from)+" → "+fmtDate(x.to)+": "+fmt(x.perDay)+" kWh/day ("+fmt(x.kw,2)+" kW)";
+    if (ntPer > 0) add("rect",{x:x0,y:Y(ntPer),width:w,height:Y(0)-Y(ntPer),fill:"var(--nt)"}).appendChild(titleEl(tip));
+    if (vtPer > 0) add("rect",{x:x0,y:Y(ntPer+vtPer),width:w,height:Y(ntPer)-Y(ntPer+vtPer),fill:"var(--accent)"}).appendChild(titleEl(tip));
+  });
+  add("text",{x:L,y:H-6,"text-anchor":"start"}, fmtDate(t0,true));
+  add("text",{x:W-R,y:H-6,"text-anchor":"end"}, fmtDate(t1,true));
+  box.appendChild(svg);
+}
+function renderTable(c){
+  var wrap = $("tablewrap"); wrap.textContent = "";
+  $("csvBtn").disabled = !c.sorted.length;
+  if (!c.sorted.length){
+    wrap.appendChild(el("p","empty","No readings yet. Read the meter, type the numbers above and save. The second reading gives you the first average."));
+    return;
+  }
+  var table = el("table"), thead = el("thead"), tr = el("tr");
+  ["Date and time","VT","NT","Interval","Used kWh","kWh/day","Avg kW","Note",""].forEach(function(h){ tr.appendChild(el("th",null,h)); });
+  thead.appendChild(tr); table.appendChild(thead);
+  var tb = el("tbody");
+  for (var i = c.sorted.length-1; i >= 0; i--){
+    var r = c.sorted[i], x = i > 0 ? c.intervals[i-1] : null, row = el("tr");
+    row.appendChild(el("td",null,fmtDate(r.t)));
+    row.appendChild(el("td",null,fmt(r.vt)));
+    row.appendChild(el("td",null,r.nt != null ? fmt(r.nt) : "–"));
+    row.appendChild(el("td",null,x ? fmtSpan(x.days) : "–"));
+    var used = el("td",null,x ? fmt(x.kwh) : "–");
+    if (x && x.kwh < 0){ used.className = "up"; used.title = "Lower than the reading before it. Check for a typo."; }
+    row.appendChild(used);
+    row.appendChild(el("td",null,x ? fmt(x.perDay) : "–"));
+    row.appendChild(el("td",null,x ? fmt(x.kw,2) : "–"));
+    row.appendChild(el("td","note",(r.note || "") + (cfg && r.pending ? (r.note ? " · " : "") + "not synced yet" : "")));
+    var td = el("td"), b = el("button","small","Delete");
+    b.type = "button"; b.dataset.id = r.id; td.appendChild(b); row.appendChild(td);
+    tb.appendChild(row);
+  }
+  table.appendChild(tb); wrap.appendChild(table);
+}
+function render(){
+  var c = compute(rows);
+  renderTiles(c); renderChart(c); renderTable(c);
+}
+
+/* ---------- local storage ---------- */
+function clean(d){
+  if (!d || typeof d.id !== "string") return null;
+  var t = Number(d.t), vt = Number(d.vt);
+  if (!isFinite(t) || !isFinite(vt)) return null;
+  var nt = d.nt == null ? null : Number(d.nt);
+  var r = { id:d.id, t:t, vt:vt, nt: isFinite(nt) ? nt : null, note: typeof d.note === "string" ? d.note.slice(0,140) : "" };
+  if (d.pending) r.pending = true;
+  return r;
+}
+function load(){
+  try { rows = (JSON.parse(localStorage.getItem(LS_ROWS)) || []).map(clean).filter(Boolean); } catch(e){ rows = []; }
+  try { deleted = JSON.parse(localStorage.getItem(LS_DEL)) || []; } catch(e){ deleted = []; }
+  try { cfg = JSON.parse(localStorage.getItem(LS_CFG)); } catch(e){ cfg = null; }
+  if (!cfg || !cfg.url || !cfg.key) cfg = null;
+}
+function persist(){
+  try {
+    localStorage.setItem(LS_ROWS, JSON.stringify(rows));
+    localStorage.setItem(LS_DEL, JSON.stringify(deleted));
+  } catch(e){ setStatus("This device refused to store the readings. Download a backup."); }
+}
+function setStatus(t){ $("status").textContent = t; }
+
+/* ---------- sync (Supabase REST) ---------- */
+function api(method, query, body, prefer){
+  var h = { apikey: cfg.key };
+  if (body){ h["Content-Type"] = "application/json"; }
+  if (prefer) h.Prefer = prefer;
+  return fetch(cfg.url + "/rest/v1/readings" + query, { method:method, headers:h, body: body ? JSON.stringify(body) : undefined, cache:"no-store" })
+    .then(function(res){
+      if (!res.ok) return res.text().then(function(t){ var e = new Error(t.slice(0,200) || ("HTTP "+res.status)); e.status = res.status; throw e; });
+      return method === "GET" ? res.json() : null;
+    });
+}
+function sync(){
+  if (!cfg) return Promise.resolve(false);
+  if (syncing){ syncAgain = true; return Promise.resolve(false); }
+  syncing = true; setStatus("Syncing…");
+  var pend = rows.filter(function(r){ return r.pending; });
+  var dels = deleted.slice();
+  var p = Promise.resolve();
+  if (pend.length) p = p.then(function(){
+    return api("POST", "?on_conflict=id", pend.map(function(r){ return { id:r.id, t:r.t, vt:r.vt, nt:r.nt, note:r.note }; }),
+      "resolution=merge-duplicates,return=minimal");
+  }).then(function(){ pend.forEach(function(r){ delete r.pending; }); persist(); });
+  dels.forEach(function(id){
+    p = p.then(function(){ return api("DELETE", "?id=eq." + encodeURIComponent(id)); })
+         .then(function(){ deleted = deleted.filter(function(x){ return x !== id; }); persist(); });
+  });
+  return p.then(function(){ return api("GET", "?select=id,t,vt,nt,note&order=t.asc"); })
+    .then(function(remote){
+      var gone = {}, have = {};
+      deleted.forEach(function(id){ gone[id] = 1; });
+      var merged = remote.map(clean).filter(function(r){ return r && !gone[r.id]; });
+      merged.forEach(function(r){ have[r.id] = 1; });
+      rows.forEach(function(r){ if (r.pending && !have[r.id]) merged.push(r); });
+      rows = merged; persist(); render();
+      var d = new Date();
+      setStatus("Synced " + pad(d.getHours()) + ":" + pad(d.getMinutes()));
+      return true;
+    })
+    .catch(function(e){
+      setStatus(e.status === 401 || e.status === 403 ? "Sync refused. Check the key."
+        : e.status === 404 ? "Sync failed. The readings table was not found."
+        : "Offline. Readings are kept here and sync later.");
+      render();
+      return false;
+    })
+    .then(function(ok){
+      syncing = false;
+      if (syncAgain){ syncAgain = false; return sync(); }
+      return ok;
+    });
+}
+
+/* ---------- events ---------- */
+function say(id, text, ok){ var m = $(id); m.textContent = text; m.className = "msg" + (ok ? " ok" : ""); }
+function download(name, text, type){
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type:type }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+}
+function stamp(){ var d = new Date(); return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
+
+$("nowBtn").addEventListener("click", function(){ $("when").value = nowLocal(); });
+$("form").addEventListener("submit", function(ev){
+  ev.preventDefault();
+  var t = new Date($("when").value).getTime();
+  var vt = parseNum($("vt").value), nt = parseNum($("nt").value);
+  if (!isFinite(t)){ say("msg","Pick the date and time of the reading."); return; }
+  if (t > Date.now() + 5*6e4){ say("msg","That time is in the future."); return; }
+  if (vt === null || isNaN(vt)){ say("msg","Enter the VT reading as a number, for example 48215.4."); return; }
+  if (nt !== null && isNaN(nt)){ say("msg","NT must be a number, or leave it empty."); return; }
+  var s = compute(rows).sorted, prev = null, next = null;
+  s.forEach(function(r){ if (r.t <= t) prev = r; else if (!next) next = r; });
+  if (prev && prev.t === t){ say("msg","There is already a reading at that exact time."); return; }
+  if (prev && (vt < prev.vt || (nt != null && prev.nt != null && nt < prev.nt))){
+    say("msg","Lower than the reading from "+fmtDate(prev.t)+". A meter only counts up, so check the digits."); return;
+  }
+  if (next && (vt > next.vt || (nt != null && next.nt != null && nt > next.nt))){
+    say("msg","Higher than the later reading from "+fmtDate(next.t)+". Check the digits or the date."); return;
+  }
+  rows.push({ id:uuid(), t:t, vt:vt, nt:nt, note:$("note").value.trim().slice(0,140), pending:true });
+  persist(); render();
+  $("vt").value = ""; $("nt").value = ""; $("note").value = ""; $("when").value = nowLocal();
+  say("msg","Saved.", true);
+  sync();
+});
+$("tablewrap").addEventListener("click", function(ev){
+  var b = ev.target.closest("button[data-id]");
+  if (!b) return;
+  if (!b.classList.contains("danger")){
+    b.classList.add("danger"); b.textContent = "Confirm delete";
+    setTimeout(function(){ if (b.isConnected){ b.classList.remove("danger"); b.textContent = "Delete"; } }, 4000);
+    return;
+  }
+  var id = b.dataset.id;
+  rows = rows.filter(function(r){ return r.id !== id; });
+  if (cfg && deleted.indexOf(id) < 0) deleted.push(id);
+  persist(); render(); sync();
+});
+$("csvBtn").addEventListener("click", function(){
+  var c = compute(rows), lines = ["datetime,vt_kwh,nt_kwh,used_kwh,kwh_per_day,avg_kw,note"];
+  c.sorted.forEach(function(r, i){
+    var x = i > 0 ? c.intervals[i-1] : null, d = new Date(r.t);
+    var iso = d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+" "+pad(d.getHours())+":"+pad(d.getMinutes());
+    lines.push([iso, r.vt, r.nt != null ? r.nt : "", x ? x.kwh.toFixed(2) : "", x ? x.perDay.toFixed(2) : "",
+      x ? x.kw.toFixed(3) : "", '"'+(r.note||"").replace(/"/g,'""')+'"'].join(","));
+  });
+  download("meter-log-"+stamp()+".csv", lines.join("\n"), "text/csv");
+});
+$("backupBtn").addEventListener("click", function(){
+  download("meter-log-backup-"+stamp()+".json",
+    JSON.stringify(rows.map(function(r){ return { id:r.id, t:r.t, vt:r.vt, nt:r.nt, note:r.note }; }), null, 1), "application/json");
+});
+$("restoreFile").addEventListener("change", function(){
+  var f = this.files[0]; this.value = "";
+  if (!f) return;
+  var rd = new FileReader();
+  rd.onload = function(){
+    try {
+      var list = JSON.parse(rd.result), have = {}, n = 0;
+      if (!Array.isArray(list)) throw 0;
+      rows.forEach(function(r){ have[r.id] = 1; });
+      list.forEach(function(d){
+        var r = clean(d);
+        if (r && !have[r.id]){ r.pending = true; rows.push(r); have[r.id] = 1; n++; }
+      });
+      persist(); render(); sync();
+      say("backupMsg", n + " reading" + (n === 1 ? "" : "s") + " added.", true);
+    } catch(e){ say("backupMsg","That file is not a Meter Log backup."); }
+  };
+  rd.readAsText(f);
+});
+$("syncSave").addEventListener("click", function(){
+  var url = $("sbUrl").value.trim().replace(/\/+$/,"").replace(/\/rest\/v1$/,""), key = $("sbKey").value.trim();
+  if (!/^https:\/\/[^\s/]+$/.test(url)){ say("syncMsg","The URL should look like https://xxxx.supabase.co"); return; }
+  if (key.length < 20){ say("syncMsg","Paste the publishable key from your Supabase project."); return; }
+  if (/^sb_secret_/.test(key)){ say("syncMsg","That is a secret key. Use the publishable key instead."); return; }
+  cfg = { url:url, key:key };
+  try { localStorage.setItem(LS_CFG, JSON.stringify(cfg)); } catch(e){}
+  rows.forEach(function(r){ r.pending = true; });
+  persist(); say("syncMsg","Connecting…", true);
+  sync().then(function(ok){ say("syncMsg", ok ? "Sync is on." : $("status").textContent, ok); });
+});
+$("syncNow").addEventListener("click", function(){
+  if (!cfg){ say("syncMsg","Enter the URL and key first."); return; }
+  sync().then(function(ok){ say("syncMsg", ok ? "Up to date." : $("status").textContent, ok); });
+});
+$("syncOff").addEventListener("click", function(){
+  cfg = null; deleted = [];
+  try { localStorage.removeItem(LS_CFG); } catch(e){}
+  persist(); $("sbUrl").value = ""; $("sbKey").value = "";
+  setStatus("On this device only"); say("syncMsg","Sync is off. Readings stay on this device.", true); render();
+});
+var rz; window.addEventListener("resize", function(){ clearTimeout(rz); rz = setTimeout(function(){ renderChart(compute(rows)); }, 150); });
+window.addEventListener("online", sync);
+document.addEventListener("visibilitychange", function(){ if (!document.hidden) sync(); });
+
+/* ---------- start ---------- */
+load();
+if (cfg){ $("sbUrl").value = cfg.url; $("sbKey").value = cfg.key; }
+$("when").value = nowLocal();
+render();
+sync();
+if ("serviceWorker" in navigator && location.protocol === "https:"){
+  navigator.serviceWorker.register("sw.js").catch(function(){});
+}
+})();
+</script>
+</body>
+</html>
